@@ -1,0 +1,29 @@
+{
+  "file_system": {
+    "location": [
+      "/opt/airflow/include/datasets"
+    ],
+    "retention_period": 7
+  },
+  
+  "bigquery": {
+    "tables": [
+      "property_listing.property_listings_stg",
+      "job_listings.jobs_stg"
+    ],
+    "retention_period": 90
+  },
+  
+  "cloud_storage": {
+    "provider": {
+      "gcs": [
+        "niblr-raw-layer-dev/property_listing_raw",
+        "niblr-raw-layer-dev/real_estate_raw"
+      ],
+      "aws": [
+        "some-bucket/some-prefix"
+      ]
+    },
+    "retention_period": 30
+  }
+} 

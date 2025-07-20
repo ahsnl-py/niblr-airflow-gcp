@@ -1,0 +1,17 @@
+{
+  "api_base_url": "http://host.docker.internal:8001/api/v1",
+  "job_payload": {
+    "job_type": "real_estate",
+    "ai_model_provider": "groq",
+    "storage_type": "memory",
+    "session_id": "string",
+    "metadata": {},
+    "max_pages": 2
+  },
+  "output_config": {
+    "gcs_bucket": "niblr-raw-layer-dev",
+    "bigquery_dataset": "raw_layer",
+    "bigquery_table": "property_listings",
+    "bigquery_schema": "raw_layer"
+  }
+} 

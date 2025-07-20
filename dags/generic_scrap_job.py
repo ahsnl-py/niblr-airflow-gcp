@@ -1,6 +1,6 @@
 """
-Property API Data Pipeline using HttpOperator
-This DAG fetches property data from an API, processes it, saves to CSV, and triggers upload to GCS/BigQuery.
+Generic Scrap Job Pipeline - Simplified
+This DAG provides a simple service for scraping data from API and uploading to GCS/BigQuery.
 """
 
 import datetime
@@ -15,6 +15,7 @@ from airflow.providers.http.operators.http import HttpOperator
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.utils.dates import days_ago
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+from typing import Dict, Any, Optional
 
 
 # Default arguments for the DAG
@@ -29,42 +30,99 @@ default_args = {
 }
 
 @dag(
-    dag_id="property_api_pipeline",
+    dag_id="generic_scrap_job",
     default_args=default_args,
-    description="Fetch property data from API, save to CSV, and trigger upload to GCS/BigQuery",
+    description="Simple scraping service for API data extraction and upload",
     schedule_interval=None,
     catchup=False,
-    tags=['property_listing', 'api', 'csv', 'upload'],
+    tags=['scraping', 'api', 'generic', 'data-pipeline'],
+    params={
+        'job_type': None,  # Required: Type of job (e.g., 'real_estate', 'job_listings')
+        'config_feile': None,  # Optional: Path to config file (defaults to job_type.json)
+        'api_base_url': 'http://host.docker.internal:8001/api/v1',  # API base URL
+        'gcs_bucket': None,  # GCS bucket for uploads
+        'bigquery_dataset': None,  # BigQuery dataset
+        'bigquery_table': None,  # BigQuery table
+    }
 )
-def property_api_pipeline():
+def generic_scrap_job():
+
+    @task
+    def load_job_config(**context):
+        """
+        Load simplified job configuration
+        """
+        params = context['params']
+        job_type = params.get('job_type')
+        
+        if not job_type:
+            raise ValueError("job_type parameter is required")
+        
+        # Determine config file path
+        config_file = params.get('config_file')
+        if not config_file:
+            config_file = f"include/configs/{job_type}.json"
+        
+        print(f"Loading configuration for job_type: {job_type}")
+        print(f"Config file path: {config_file}")
+        
+        try:
+            # Load configuration from file
+            with open(config_file, 'r') as f:
+                job_config = json.load(f)
+            
+            # Validate required configuration fields
+            required_fields = ['job_payload', 'output_config']
+            missing_fields = [field for field in required_fields if field not in job_config]
+            
+            if missing_fields:
+                raise ValueError(f"Missing required configuration fields: {missing_fields}")
+            
+            # Override with DAG parameters if provided
+            if params.get('api_base_url'):
+                job_config['api_base_url'] = params['api_base_url']
+            if params.get('gcs_bucket'):
+                job_config['output_config']['gcs_bucket'] = params['gcs_bucket']
+            if params.get('bigquery_dataset'):
+                job_config['output_config']['bigquery_dataset'] = params['bigquery_dataset']
+            if params.get('bigquery_table'):
+                job_config['output_config']['bigquery_table'] = params['bigquery_table']
+            
+            print(f"✅ Configuration loaded successfully")
+            print(f"Job payload: {job_config['job_payload']}")
+            print(f"Output config: {job_config['output_config']}")
+            
+            # Store configuration in XCom
+            context['task_instance'].xcom_push(key='job_config', value=job_config)
+            
+            return job_config
+            
+        except FileNotFoundError:
+            raise FileNotFoundError(f"Configuration file not found: {config_file}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in configuration file: {str(e)}")
+        except Exception as e:
+            raise Exception(f"Error loading configuration: {str(e)}")
 
     @task
     def fetch_api_data(**context):
         """
-        Fetch data from property API with job creation and polling
+        Fetch data from API with job creation and polling
         """
-        # API configuration
-        api_base_url = "http://host.docker.internal:8001/api/v1"
-        # api_base_url = "http://localhost:8001/api/v1"
+        job_config = context['task_instance'].xcom_pull(task_ids='load_job_config', key='job_config')
+        
+        api_base_url = job_config['api_base_url']
+        job_payload = job_config['job_payload']
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json',
             'Content-Type': 'application/json',
         }
         
-        # Job creation payload
-        job_payload = {
-            "job_type": "real_estate",
-            "ai_model_provider": "groq",
-            "storage_type": "memory",
-            "session_id": "string",
-            "metadata": {},
-            "max_pages": 2
-        }
-        
         try:
             # Step 1: Create job
-            print("Creating job...")
+            print(f"Creating job with payload: {job_payload}")
             create_response = requests.post(
                 f"{api_base_url}/jobs",
                 headers=headers,
@@ -78,9 +136,9 @@ def property_api_pipeline():
             print(f"Job created with ID: {job_id}")
             
             # Step 2: Poll for job completion
-            max_attempts = 60  # Maximum 5 minutes (60 * 5 seconds)
-            attempt = 0
+            max_attempts = 60
             delay_seconds = 5
+            attempt = 0
             
             while attempt < max_attempts:
                 print(f"Polling job status (attempt {attempt + 1}/{max_attempts})...")
@@ -147,70 +205,48 @@ def property_api_pipeline():
             raise
 
     @task
-    def parse_and_process_data(**context):
+    def save_to_csv(**context):
         """
-        Parse API data and load into pandas DataFrame
+        Save API data directly to CSV with simple processing
         """
-        # Get data from previous task
+        job_config = context['task_instance'].xcom_pull(task_ids='load_job_config', key='job_config')
         api_data = context['task_instance'].xcom_pull(task_ids='fetch_api_data', key='api_data')
+        
+        output_config = job_config['output_config']
         
         try:
             # Convert to pandas DataFrame
             df = pd.DataFrame(api_data)
             
-            # Basic data cleaning
             if not df.empty:
-                # Remove any completely empty rows
+                # Simple data cleaning - just remove completely empty rows
                 df = df.dropna(how='all')
-                
-                # Fill NaN values with appropriate defaults
-                df = df.fillna('')
                 
                 # Add timestamp
                 df['processed_at'] = datetime.datetime.now().isoformat()
+                df['job_type'] = job_config['job_payload']['job_type']
                 
                 print(f"DataFrame shape: {df.shape}")
                 print(f"DataFrame columns: {list(df.columns)}")
                 print(f"First few rows:\n{df.head()}")
             
-            # Store DataFrame in XCom (as JSON for compatibility)
-            df_json = df.to_json(orient='records', date_format='iso')
-            context['task_instance'].xcom_push(key='processed_data', value=df_json)
+            # Create folder structure
+            current_date = datetime.datetime.now()
+            year_month = current_date.strftime("%Y-%m")
             
-            return df.to_dict('records')
+            # Create directory structure
+            base_dir = "include/datasets"
+            year_month_dir = os.path.join(base_dir, year_month)
             
-        except Exception as e:
-            print(f"Error processing data: {str(e)}")
-            raise
-
-    @task
-    def save_to_csv(**context):
-        """
-        Save processed data to CSV with year-month folder structure
-        """
-        # Get processed data from previous task
-        df_json = context['task_instance'].xcom_pull(task_ids='parse_and_process_data', key='processed_data')
-        
-        # Convert back to DataFrame
-        df = pd.read_json(df_json, orient='records')
-        
-        # Create year-month folder structure
-        current_date = datetime.datetime.now()
-        year_month = current_date.strftime("%Y-%m")
-        
-        # Create directory structure
-        base_dir = "include/datasets"
-        year_month_dir = os.path.join(base_dir, year_month)
-        
-        # Create directories if they don't exist
-        os.makedirs(year_month_dir, exist_ok=True)
-        
-        # Generate filename with timestamp
-        timestamp = current_date.strftime("%Y%m%d_%H%M%S")
-        filename = f"property_listing_job_{timestamp}.csv"
-        filepath = os.path.join(year_month_dir, filename)
-        
-        try:
+            # Create directories if they don't exist
+            os.makedirs(year_month_dir, exist_ok=True)
+            
+            # Generate filename
+            timestamp = current_date.strftime("%Y%m%d_%H%M%S")
+            job_type = job_config['job_payload']['job_type']
+            filename = f"{job_type}_{timestamp}.csv"
+            filepath = os.path.join(year_month_dir, filename)
+            
             # Save DataFrame to CSV
             df.to_csv(filepath, index=False, encoding='utf-8')
             
@@ -218,7 +254,7 @@ def property_api_pipeline():
             print(f"File size: {os.path.getsize(filepath)} bytes")
             print(f"Records saved: {len(df)}")
             
-            # Store filepath and year_month in XCom for downstream tasks
+            # Store filepath and metadata in XCom
             context['task_instance'].xcom_push(key='csv_filepath', value=filepath)
             context['task_instance'].xcom_push(key='year_month', value=year_month)
             
@@ -233,41 +269,36 @@ def property_api_pipeline():
         """
         Trigger the generic upload DAG to upload CSV file to GCS and load to BigQuery
         """
-        # Get filepath and year_month from previous task
+        job_config = context['task_instance'].xcom_pull(task_ids='load_job_config', key='job_config')
         csv_filepath = context['task_instance'].xcom_pull(task_ids='save_to_csv', key='csv_filepath')
         year_month = context['task_instance'].xcom_pull(task_ids='save_to_csv', key='year_month')
         
-        # Get GCS bucket from environment variable
-        gcs_bucket = os.getenv("GCS_BUCKET_RAW", "niblr-raw-layer-dev")
+        output_config = job_config['output_config']
         
-        # Create GCS destination path
-        gcs_destination = f"property_listing_raw/{year_month}/"
-        
-        print(f"Preparing to trigger upload DAG:")
-        print(f"  Source file: {csv_filepath}")
-        print(f"  GCS bucket: {gcs_bucket}")
-        print(f"  GCS destination: {gcs_destination}")
-        print(f"  Year-month: {year_month}")
+        # Build GCS destination path
+        job_type = job_config['job_payload']['job_type']
+        gcs_destination = f"{job_type}_raw/{year_month}/"
         
         # Configuration for the upload DAG
         upload_config = {
             'source_file_path': csv_filepath,
-            'gcs_bucket': gcs_bucket,
+            'gcs_bucket': output_config['gcs_bucket'],
             'gcs_destination': gcs_destination,
             'mime_type': 'text/csv',
             'gzip': True,
-            'bigquery_dataset_id': 'property_listing',
-            'bigquery_table_name': 'property_listing_stg',
-            'bigquery_schema_name': 'property_listing',
+            'bigquery_dataset_id': output_config['bigquery_dataset'],
+            'bigquery_table_name': output_config['bigquery_table'],
+            'bigquery_schema_name': output_config.get('bigquery_schema', output_config['bigquery_dataset']),
             'create_dataset_if_missing': True,
-            'use_native_support': False,
-            'if_exists': 'replace',
+            'source_format': 'CSV',
+            'write_disposition': 'WRITE_TRUNCATE',
+            'autodetect': True,
+            'skip_leading_rows': 1,
             'metadata': {
-                'source': 'property_api',
-                'data_type': 'property_listings',
+                'source': 'api',
+                'job_type': job_type,
                 'upload_date': '{{ ds }}',
-                'year_month': year_month,
-                'environment': 'development'
+                'year_month': year_month
             }
         }
         
@@ -275,7 +306,7 @@ def property_api_pipeline():
         for key, value in upload_config.items():
             print(f"  {key}: {value}")
         
-        # Trigger the generic upload DAG directly
+        # Trigger the generic upload DAG
         trigger_upload = TriggerDagRunOperator(
             task_id='trigger_upload_to_gcs_and_bigquery',
             trigger_dag_id='upload_file_gc_job',
@@ -293,13 +324,13 @@ def property_api_pipeline():
         return result
 
     # Define task dependencies
+    config = load_job_config()
     api_data = fetch_api_data()
-    processed_data = parse_and_process_data()
     csv_file = save_to_csv()
     upload_result = trigger_upload_to_gcs_and_bigquery()
     
     # Set up the workflow
-    api_data >> processed_data >> csv_file >> upload_result
+    config >> api_data >> csv_file >> upload_result
 
 # Create the DAG instance
-property_api_dag = property_api_pipeline()
+generic_scrap_job_instance = generic_scrap_job() 

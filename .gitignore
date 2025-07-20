@@ -1,3 +1,4 @@
 .env
 .google*
 logs*
+include/datasets/*

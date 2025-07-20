@@ -21,8 +21,9 @@ x-airflow-common:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
+    - ./include:/opt/airflow/include  # Mount include directory for config files
     - ./.google/credentials/:/.google/credentials:ro
-  user: "1001:0"  # Set to match your Linux UID
+  user: "50000:0"  # Use Airflow's default user ID (50000)
   depends_on:
     postgres:
       condition: service_healthy
