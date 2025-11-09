@@ -45,8 +45,8 @@ default_args = {
         'bigquery_schema_name': None, # BigQuery schema name (optional, defaults to dataset_id)
         'create_dataset_if_missing': True,  # Create dataset if it doesn't exist
         'source_format': 'CSV',     # Source format: CSV, JSON, PARQUET, AVRO, ORC
-        'if_exists': 'replace',     # What to do if table exists ('replace', 'append', 'fail')
-        'write_disposition': 'WRITE_TRUNCATE',  # WRITE_TRUNCATE, WRITE_APPEND, WRITE_EMPTY
+        'if_exists': 'append',      # What to do if table exists ('replace', 'append', 'fail')
+        'write_disposition': 'WRITE_APPEND',  # WRITE_TRUNCATE, WRITE_APPEND, WRITE_EMPTY
         'autodetect': True,         # Auto-detect schema from data
         'skip_leading_rows': 1,     # Skip header rows for CSV
         'field_delimiter': ',',     # Field delimiter for CSV
@@ -111,7 +111,7 @@ def upload_file_gc_job():
                 source_format = 'CSV'
         
         # Map if_exists to write_disposition
-        if_exists = params.get('if_exists', 'replace')
+        if_exists = params.get('if_exists', 'append')
         if if_exists == 'replace':
             write_disposition = 'WRITE_TRUNCATE'
         elif if_exists == 'append':

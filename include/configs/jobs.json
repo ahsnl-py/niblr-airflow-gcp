@@ -6,12 +6,12 @@
     "storage_type": "memory",
     "session_id": "string",
     "metadata": {},
-    "max_pages": 2
+    "max_pages": 5
   },
   "output_config": {
     "gcs_bucket": "niblr-raw-layer-dev",
     "bigquery_dataset": "raw_layer",
-    "bigquery_table": "job_listing",
+    "bigquery_table": "job_listings_partitioned",
     "bigquery_schema": "raw_layer"
   }
 } 

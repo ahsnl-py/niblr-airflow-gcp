@@ -110,3 +110,7 @@ celerybeat.pid
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+notebooks/
+./niblr-airflow-gcp/dags/real_estate_scrap_job.py
+./niblr-airflow-gcp/dags/upload_file_gc_job.py

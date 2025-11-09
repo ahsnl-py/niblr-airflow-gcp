@@ -1,0 +1,21 @@
+{
+  "procedure_path": "niblr-agentic-service.raw_layer.archive_table_partition",
+  "archive_bucket": "gs://niblr-archive-layer-dev",
+  "archive_lag_days": 30,
+  "export_format": "PARQUET",
+  "export_suffix": "parquet",
+  "export_enabled": true,
+  "tables": [
+    {
+      "task_id": "archive_property_listings",
+      "table": "niblr-agentic-service.raw_layer.property_listings_partitioned",
+      "archive_key": "real_estate_raw"
+    },
+    {
+      "task_id": "archive_job_listings",
+      "table": "niblr-agentic-service.raw_layer.job_listings_partitioned",
+      "archive_key": "job_listings_raw"
+    }
+  ]
+}
+

@@ -43,6 +43,7 @@ default_args = {
         'gcs_bucket': None,  # GCS bucket for uploads
         'bigquery_dataset': None,  # BigQuery dataset
         'bigquery_table': None,  # BigQuery table
+        'table_action': 'append',  # Action when table exists ('replace', 'append', 'fail')
     }
 )
 def generic_scrap_job():
@@ -87,6 +88,8 @@ def generic_scrap_job():
                 job_config['output_config']['bigquery_dataset'] = params['bigquery_dataset']
             if params.get('bigquery_table'):
                 job_config['output_config']['bigquery_table'] = params['bigquery_table']
+            if params.get('table_action'):
+                job_config['output_config']['table_action'] = params['table_action']
             
             print(f"✅ Configuration loaded successfully")
             print(f"Job payload: {job_config['job_payload']}")
@@ -120,6 +123,11 @@ def generic_scrap_job():
             'Content-Type': 'application/json',
         }
         
+        # Configure timeouts - different for different operations
+        create_timeout = 60  # Longer timeout for job creation
+        status_timeout = 45  # Longer timeout for status checks
+        result_timeout = 120  # Much longer timeout for getting results
+        
         try:
             # Step 1: Create job
             print(f"Creating job with payload: {job_payload}")
@@ -127,7 +135,7 @@ def generic_scrap_job():
                 f"{api_base_url}/jobs",
                 headers=headers,
                 json=job_payload,
-                timeout=30
+                timeout=create_timeout
             )
             create_response.raise_for_status()
             
@@ -135,64 +143,86 @@ def generic_scrap_job():
             job_id = job_data['id']
             print(f"Job created with ID: {job_id}")
             
-            # Step 2: Poll for job completion
-            max_attempts = 60
-            delay_seconds = 5
+            # Step 2: Poll for job completion with exponential backoff
+            max_attempts = 120  # Increased max attempts
+            base_delay = 10  # Start with 10 seconds
+            max_delay = 300  # Max delay of 5 minutes
             attempt = 0
             
             while attempt < max_attempts:
                 print(f"Polling job status (attempt {attempt + 1}/{max_attempts})...")
                 
-                # Get job status
-                status_response = requests.get(
-                    f"{api_base_url}/jobs/{job_id}",
-                    headers=headers,
-                    timeout=30
-                )
-                status_response.raise_for_status()
-                
-                job_status = status_response.json()
-                status = job_status['status']
-                
-                print(f"Job status: {status}")
-                
-                if status == 'completed':
-                    print("Job completed successfully!")
-                    break
-                elif status == 'failed':
-                    error_msg = job_status.get('error_message', 'Unknown error')
-                    raise Exception(f"Job failed: {error_msg}")
-                elif status in ['pending', 'running']:
-                    print(f"Job still {status}, waiting {delay_seconds} seconds...")
-                    time.sleep(delay_seconds)
+                try:
+                    # Get job status with retry logic
+                    status_response = requests.get(
+                        f"{api_base_url}/jobs/{job_id}",
+                        headers=headers,
+                        timeout=status_timeout
+                    )
+                    status_response.raise_for_status()
+                    
+                    job_status = status_response.json()
+                    status = job_status['status']
+                    
+                    print(f"Job status: {status}")
+                    
+                    if status == 'completed':
+                        print("Job completed successfully!")
+                        break
+                    elif status == 'failed':
+                        error_msg = job_status.get('error_message', 'Unknown error')
+                        raise Exception(f"Job failed: {error_msg}")
+                    elif status in ['pending', 'running']:
+                        # Calculate delay with exponential backoff
+                        delay = min(base_delay * (2 ** (attempt // 10)), max_delay)
+                        print(f"Job still {status}, waiting {delay} seconds...")
+                        time.sleep(delay)
+                        attempt += 1
+                    else:
+                        raise Exception(f"Unknown job status: {status}")
+                        
+                except requests.exceptions.Timeout:
+                    print(f"Timeout on attempt {attempt + 1}, retrying...")
                     attempt += 1
-                else:
-                    raise Exception(f"Unknown job status: {status}")
+                    if attempt >= max_attempts:
+                        raise Exception("Job polling failed due to repeated timeouts")
+                    continue
+                except requests.exceptions.RequestException as e:
+                    print(f"Request error on attempt {attempt + 1}: {str(e)}")
+                    attempt += 1
+                    if attempt >= max_attempts:
+                        raise Exception(f"Job polling failed due to request errors: {str(e)}")
+                    time.sleep(base_delay)
+                    continue
             
             if attempt >= max_attempts:
                 raise Exception("Job polling timeout - job did not complete within expected time")
             
-            # Step 3: Get job results
+            # Step 3: Get job results with longer timeout
             print("Fetching job results...")
-            result_response = requests.get(
-                f"{api_base_url}/jobs/{job_id}/result",
-                headers=headers,
-                timeout=30
-            )
-            result_response.raise_for_status()
-            
-            result_data = result_response.json()
-            extracted_data = result_data.get('data', [])
-            
-            print(f"Extracted {len(extracted_data)} items")
-            print(f"Total items: {result_data.get('total_items', 0)}")
-            print(f"Extraction time: {result_data.get('extraction_time', 0)} seconds")
-            
-            # Store the extracted data in XCom
-            context['task_instance'].xcom_push(key='api_data', value=extracted_data)
-            context['task_instance'].xcom_push(key='job_metadata', value=result_data.get('metadata', {}))
-            
-            return extracted_data
+            try:
+                result_response = requests.get(
+                    f"{api_base_url}/jobs/{job_id}/result",
+                    headers=headers,
+                    timeout=result_timeout
+                )
+                result_response.raise_for_status()
+                
+                result_data = result_response.json()
+                extracted_data = result_data.get('data', [])
+                
+                print(f"Extracted {len(extracted_data)} items")
+                print(f"Total items: {result_data.get('total_items', 0)}")
+                print(f"Extraction time: {result_data.get('extraction_time', 0)} seconds")
+                
+                # Store the extracted data in XCom
+                context['task_instance'].xcom_push(key='api_data', value=extracted_data)
+                context['task_instance'].xcom_push(key='job_metadata', value=result_data.get('metadata', {}))
+                
+                return extracted_data
+                
+            except requests.exceptions.Timeout:
+                raise Exception("Timeout while fetching job results - the job may have completed but results are too large")
             
         except requests.exceptions.RequestException as e:
             print(f"Error in API request: {str(e)}")
@@ -291,7 +321,7 @@ def generic_scrap_job():
             'bigquery_schema_name': output_config.get('bigquery_schema', output_config['bigquery_dataset']),
             'create_dataset_if_missing': True,
             'source_format': 'CSV',
-            'write_disposition': 'WRITE_TRUNCATE',
+            'if_exists': output_config['table_action'],
             'autodetect': True,
             'skip_leading_rows': 1,
             'metadata': {
