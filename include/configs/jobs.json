@@ -6,7 +6,7 @@
     "storage_type": "memory",
     "session_id": "string",
     "metadata": {},
-    "max_pages": 5
+    "max_pages": 1
   },
   "output_config": {
     "gcs_bucket": "niblr-raw-layer-dev",

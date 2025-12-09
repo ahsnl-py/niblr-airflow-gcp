@@ -44,7 +44,7 @@ default_args = {
         'bigquery_table_name': None,  # BigQuery table name
         'bigquery_schema_name': None, # BigQuery schema name (optional, defaults to dataset_id)
         'create_dataset_if_missing': True,  # Create dataset if it doesn't exist
-        'source_format': 'CSV',     # Source format: CSV, JSON, PARQUET, AVRO, ORC
+        'source_format': 'CSV',     # Source format: CSV, NEWLINE_DELIMITED_JSON, JSON, PARQUET, AVRO, ORC
         'if_exists': 'append',      # What to do if table exists ('replace', 'append', 'fail')
         'write_disposition': 'WRITE_APPEND',  # WRITE_TRUNCATE, WRITE_APPEND, WRITE_EMPTY
         'autodetect': True,         # Auto-detect schema from data
@@ -95,12 +95,13 @@ def upload_file_gc_job():
         # Set default schema name if not provided
         schema_name = params.get('bigquery_schema_name', params['bigquery_dataset_id'])
         
-        # Determine source format from file extension or MIME type
-        source_format = params.get('source_format', 'CSV')
+        # Determine source format from file extension or use provided format
+        source_format = params.get('source_format')
         if not source_format:
+            # Auto-detect from file extension if not explicitly specified
             file_ext = os.path.splitext(source_file)[1].lower()
             if file_ext == '.json':
-                source_format = 'JSON'
+                source_format = 'NEWLINE_DELIMITED_JSON'  # Default JSON format for BigQuery
             elif file_ext == '.parquet':
                 source_format = 'PARQUET'
             elif file_ext == '.avro':
@@ -108,7 +109,7 @@ def upload_file_gc_job():
             elif file_ext == '.orc':
                 source_format = 'ORC'
             else:
-                source_format = 'CSV'
+                source_format = 'CSV'  # Default to CSV
         
         # Map if_exists to write_disposition
         if_exists = params.get('if_exists', 'append')
@@ -133,7 +134,7 @@ def upload_file_gc_job():
             'source_format': source_format,
             'write_disposition': write_disposition,
             'autodetect': params.get('autodetect', True),
-            'skip_leading_rows': params.get('skip_leading_rows', 1),
+            'skip_leading_rows': params.get('skip_leading_rows', 1 if source_format == 'CSV' else (0 if 'JSON' in source_format else 1)),
             'field_delimiter': params.get('field_delimiter', ','),
             'allow_quoted_newlines': params.get('allow_quoted_newlines', True),
             'allow_jagged_rows': params.get('allow_jagged_rows', True),

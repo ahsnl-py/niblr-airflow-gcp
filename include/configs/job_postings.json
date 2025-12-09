@@ -1,0 +1,31 @@
+{
+  "api_base_url": "http://host.docker.internal:8001/api/v1",
+  "source_query": {
+    "project_id": "niblr-agentic-service",
+    "dataset": "raw_layer",
+    "table": "job_listings_partitioned",
+    "url_column": "link",
+    "job_id_column": "job_id"
+  },
+  "job_payload": {
+    "extraction_strategy": "llm",
+    "schema_name": "job_details",
+    "metadata": {
+      "execution_mode": "concurrent"
+    }
+  },
+  "output_config": {
+    "gcs_bucket": "niblr-raw-layer-dev",
+    "bigquery_dataset": "raw_layer",
+    "bigquery_table": "job_postings_stg",
+    "bigquery_schema": "raw_layer",
+    "table_action": "append"
+  },
+  "timeout_per_url": 600,
+  "polling": {
+    "base_delay": 120,
+    "max_delay": 900,
+    "max_attempts": 30,
+    "backoff_divisor": 20
+  }
+}
